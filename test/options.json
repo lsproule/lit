@@ -1,0 +1,6 @@
+{
+  "begin": "```c",
+  "end": "```",
+  "output_file": "main.c",
+  "command": "cc -o main ./main.c && ./main"
+}

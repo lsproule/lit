@@ -1,0 +1,28 @@
+\documentclass{article}
+\title{Learning golang}
+\author{Lucas Sproule}
+\newenvironment{code}{\footnotesize\verbatim}{\endverbatim\normalsize}
+\begin{document}
+  \maketitle
+\section{packages}{
+  At the top of every go file you must say:
+  \begin{code}
+    package main
+  \end{code}
+}
+\section{imports}{
+  To import a package you use the import keyword:
+  \begin{code}
+    import "fmt"
+  \end{code}
+}
+
+\section{Main}{
+  The main function is the entry point of the program:
+  \begin{code}
+    func main() {
+      fmt.Println("Hello, World!")
+    }
+  \end{code}
+}
+\end{document}
