@@ -79,23 +79,31 @@ func openFile(fileName string, flags *Flags, outputChan chan<- File, wg *sync.Wa
 	parseFile(string(data), flags, outputChan)
 }
 
-func writeOutput(outputChan <-chan File, wg *sync.WaitGroup) {
+func writeToFile(file File, wg *sync.WaitGroup) {
 	defer wg.Done()
-	for file := range outputChan {
-		outputFile, err := os.Create(file.FileName)
-		if err != nil {
-			fmt.Printf("failed to create output file %s: %v\n", file.FileName, err)
-			continue
-		}
-		defer outputFile.Close()
+	outputFile, err := os.Create(file.FileName)
+	if err != nil {
+		fmt.Printf("failed to create output file %s: %v\n", file.FileName, err)
+		return
+	}
+	defer outputFile.Close()
 
-		for _, line := range file.OutputArr {
-			if _, err := outputFile.WriteString(line + "\n"); err != nil {
-				fmt.Printf("failed to write to output file %s: %v\n", file.FileName, err)
-				break
-			}
+	for _, line := range file.OutputArr {
+		if _, err := outputFile.WriteString(line + "\n"); err != nil {
+			fmt.Printf("failed to write to output file %s: %v\n", file.FileName, err)
+			break
 		}
 	}
+}
+
+func writeOutput(outputChan <-chan File, wg *sync.WaitGroup) {
+	defer wg.Done()
+	var writeWg sync.WaitGroup
+	for file := range outputChan {
+		writeWg.Add(1)
+		go writeToFile(file, &writeWg)
+	}
+	writeWg.Wait()
 }
 
 func runCommand(command string) error {
