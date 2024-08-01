@@ -1,147 +1,161 @@
-package main 
+package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"strings"
-  "os/exec"
 )
 
+type File struct {
+	FileName  string   `json:"file_name"`
+	OutputArr []string `json:"outputArr"`
+}
+
 type Flags struct {
-	Begin   string `json:"begin"`
-	End     string `json:"end"`
-	Command string `json:"command"`
-	OutputFile  string `json:"output_file"`
-	options string
-	outputArr  []string
-  output string
-	help    bool
+	Begin         string            `json:"begin"`
+	End           string            `json:"end"`
+	Command       string            `json:"command"`
+	OutputFile    string            `json:"output_file"`
+	FileNameStart string            `json:"file_name_start"`
+	FileNameEnd   string            `json:"file_name_end"`
+	Options       string            `json:"options"`
+	OutputMap     map[string]File   `json:"output_map"`
+	Help          bool              `json:"help"`
 }
 
-func ParseOptions(options string, flags *Flags) {
-  options_file, err := os.Open(options)
-  if err != nil {
-    fmt.Println("Error: ", err)
-    os.Exit(1)
-  }
+func parseOptions(options string, flags *Flags) error {
+	optionsFile, err := os.Open(options)
+	if err != nil {
+		return fmt.Errorf("failed to open options file: %v", err)
+	}
+	defer optionsFile.Close()
 
-  stat, err := options_file.Stat()
-  if err != nil {
-    fmt.Println("Error: ", err)
-    os.Exit(1)
-  }
+	data, err := ioutil.ReadAll(optionsFile)
+	if err != nil {
+		return fmt.Errorf("failed to read options file: %v", err)
+	}
 
-  bs := make([]byte, stat.Size())
-  _, err = options_file.Read(bs)
+	if err := json.Unmarshal(data, flags); err != nil {
+		return fmt.Errorf("failed to unmarshal options file: %v", err)
+	}
 
-  if err != nil {
-    fmt.Println("Error: ", err)
-    os.Exit(1)
-  }
-  json.Unmarshal([]byte(bs), flags)
-
+	return nil
 }
 
-func ParseFile(data string, flags *Flags) string {
-	in_code := false
+func parseFile(data string, flags *Flags) {
+	inCode := false
+	fileName := ""
+	flags.OutputMap = make(map[string]File)
 	for _, line := range strings.Split(data, "\n") {
 		if strings.Contains(line, flags.Begin) {
-			in_code = true
+			inCode = true
+			fileName = strings.Split(line, flags.FileNameStart)[1]
+			fileName = strings.Split(fileName, flags.FileNameEnd)[0]
 			continue
 		}
 		if strings.Contains(line, flags.End) {
-			in_code = false
+			inCode = false
 			continue
 		}
-		if in_code {
-			flags.outputArr = append(flags.outputArr, line)
+		if inCode {
+			if _, ok := flags.OutputMap[fileName]; !ok {
+				flags.OutputMap[fileName] = File{FileName: fileName}
+			}
+			entry := flags.OutputMap[fileName]
+			entry.OutputArr = append(entry.OutputArr, line)
+			flags.OutputMap[fileName] = entry
 		}
 	}
-  flags.output = strings.Join(flags.outputArr[:], "\n")
-	return flags.output 
 }
 
-func Openfile(file_name string) (string, error) {
-	file, err := os.Open(file_name)
+func openFile(fileName string) (string, error) {
+	data, err := ioutil.ReadFile(fileName)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to read file %s: %v", fileName, err)
 	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return "", err
-	}
-
-	bs := make([]byte, stat.Size())
-	_, err = file.Read(bs)
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return "", err
-	}
-	str := string(bs)
-	return str, nil
+	return string(data), nil
 }
 
-func WriteOutput(flags Flags) {
-  os.WriteFile(flags.OutputFile, []byte(flags.output), 0644)
+func writeOutput(flags Flags) error {
+	for fileName, file := range flags.OutputMap {
+		outputFile, err := os.Create(fileName)
+		if err != nil {
+			return fmt.Errorf("failed to create output file %s: %v", fileName, err)
+		}
+		defer outputFile.Close()
+
+		for _, line := range file.OutputArr {
+			if _, err := outputFile.WriteString(line + "\n"); err != nil {
+				return fmt.Errorf("failed to write to output file %s: %v", fileName, err)
+			}
+		}
+	}
+	return nil
 }
 
-func RunCommand(command string) {
-  cmd := exec.Command("bash", "-c", command)
-  out, err := cmd.CombinedOutput()
-  if err != nil{
-    fmt.Println("Error: ", err)
-    fmt.Println("Output: ", string(out))
-    os.Exit(1)
-  }
-  fmt.Println(string(out))
+func runCommand(command string) error {
+	cmd := exec.Command("bash", "-c", command)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to execute command %s: %v\nOutput: %s", command, err, string(out))
+	}
+	fmt.Println(string(out))
+	return nil
 }
 
 func main() {
-	args := os.Args[1:]
 	flags := Flags{}
-	if len(args) == 0 {
-		fmt.Println("Please provide a file name")
-		os.Exit(1)
-	}
 	flag.StringVar(&flags.Begin, "begin", "\\begin{code}", "Begin string")
-	flag.StringVar(&flags.options, "options", "", "Options file")
-	flag.StringVar(&flags.OutputFile , "o", "output.txt", "Output file")
-  flag.StringVar(&flags.Command, "command", "", "Command to run after output")
+	flag.StringVar(&flags.Options, "options", "", "Options file")
+	flag.StringVar(&flags.OutputFile, "o", "output.txt", "Output file")
+	flag.StringVar(&flags.FileNameStart, "fstart", "{", "Specify start of file name")
+	flag.StringVar(&flags.FileNameEnd, "fend", "}", "Specify end of file name")
+	flag.StringVar(&flags.Command, "command", "", "Command to run after output")
 	flag.StringVar(&flags.End, "end", "\\end{code}", "End string")
-	flag.BoolVar(&flags.help, "help", false, "shows help")
-  
+	flag.BoolVar(&flags.Help, "help", false, "Shows help")
+
 	flag.Parse()
 
-  if flags.help{
-    os.Exit(0)
-  }
-
-	var file string
-  
-	if flags.options != "" {
-    ParseOptions(flags.options, &flags)
+	if flags.Help {
+		flag.Usage()
+		os.Exit(0)
 	}
 
-	for index, arg := range args {
-		if arg == "--" {
-			file = args[index+1]
+	if flags.Options != "" {
+		if err := parseOptions(flags.Options, &flags); err != nil {
+			fmt.Println("Error: ", err)
+			os.Exit(1)
 		}
 	}
 
-	data, err := Openfile(file)
-
-	if err != nil {
-		fmt.Println("Error: ", err)
+	files := flag.Args()
+	if len(files) == 0 {
+		fmt.Println("Please provide at least one file name")
 		os.Exit(1)
 	}
-	ParseFile(data, &flags)
-  WriteOutput(flags)
-  if flags.Command != "" {
-    RunCommand(flags.Command)
-  }
+
+	for _, file := range files {
+		data, err := openFile(file)
+		if err != nil {
+			fmt.Println("Error: ", err)
+			os.Exit(1)
+		}
+		parseFile(data, &flags)
+		if err := writeOutput(flags); err != nil {
+			fmt.Println("Error: ", err)
+			os.Exit(1)
+		}
+	}
+
+	if flags.Command != "" {
+		if err := runCommand(flags.Command); err != nil {
+			fmt.Println("Error: ", err)
+			os.Exit(1)
+		}
+	}
 }
+

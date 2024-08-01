@@ -2,5 +2,7 @@
   "begin": "```c",
   "end": "```",
   "output_file": "main.c",
-  "command": "cc -o main ./main.c && ./main"
+  "command": "cc -o main ./main.c && ./main",
+  "file_name_start": "filename=",
+  "file_name_end": " "
 }
