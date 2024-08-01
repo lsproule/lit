@@ -142,24 +142,20 @@ func main() {
 	var wg sync.WaitGroup
 	outputChan := make(chan File, len(files))
 
-	// Start goroutines to process each file
 	for _, file := range files {
 		wg.Add(1)
 		go openFile(file, &flags, outputChan, &wg)
 	}
 
-	// Wait for all file processing to complete and then close the channel
 	go func() {
 		wg.Wait()
 		close(outputChan)
 	}()
 
-	// Start goroutine to write output files
 	var writeWg sync.WaitGroup
 	writeWg.Add(1)
 	go writeOutput(outputChan, &writeWg)
 
-	// Wait for all writing to complete
 	writeWg.Wait()
 
 	if flags.Command != "" {
