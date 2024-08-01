@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 type File struct {
@@ -15,15 +16,14 @@ type File struct {
 }
 
 type Flags struct {
-	Begin         string            `json:"begin"`
-	End           string            `json:"end"`
-	Command       string            `json:"command"`
-	OutputFile    string            `json:"output_file"`
-	FileNameStart string            `json:"file_name_start"`
-	FileNameEnd   string            `json:"file_name_end"`
-	Options       string            `json:"options"`
-	OutputMap     map[string]File   `json:"output_map"`
-	Help          bool              `json:"help"`
+	Begin         string `json:"begin"`
+	End           string `json:"end"`
+	Command       string `json:"command"`
+	OutputFile    string `json:"output_file"`
+	FileNameStart string `json:"file_name_start"`
+	FileNameEnd   string `json:"file_name_end"`
+	Options       string `json:"options"`
+	Help          bool   `json:"help"`
 }
 
 func parseOptions(options string, flags *Flags) error {
@@ -39,10 +39,10 @@ func parseOptions(options string, flags *Flags) error {
 	return nil
 }
 
-func parseFile(data string, flags *Flags) {
+func parseFile(data string, flags *Flags, outputChan chan<- File) {
 	inCode := false
 	fileName := ""
-	flags.OutputMap = make(map[string]File)
+	localOutputMap := make(map[string]File)
 	for _, line := range strings.Split(data, "\n") {
 		if strings.Contains(line, flags.Begin) {
 			inCode = true
@@ -55,39 +55,47 @@ func parseFile(data string, flags *Flags) {
 			continue
 		}
 		if inCode {
-			if _, ok := flags.OutputMap[fileName]; !ok {
-				flags.OutputMap[fileName] = File{FileName: fileName}
+			if _, ok := localOutputMap[fileName]; !ok {
+				localOutputMap[fileName] = File{FileName: fileName}
 			}
-			entry := flags.OutputMap[fileName]
+			entry := localOutputMap[fileName]
 			entry.OutputArr = append(entry.OutputArr, line)
-			flags.OutputMap[fileName] = entry
+			localOutputMap[fileName] = entry
 		}
 	}
+
+	for _, file := range localOutputMap {
+		outputChan <- file
+	}
 }
 
-func openFile(fileName string) (string, error) {
+func openFile(fileName string, flags *Flags, outputChan chan<- File, wg *sync.WaitGroup) {
+	defer wg.Done()
 	data, err := os.ReadFile(fileName)
 	if err != nil {
-		return "", fmt.Errorf("failed to read file %s: %v", fileName, err)
+		fmt.Printf("failed to read file %s: %v\n", fileName, err)
+		return
 	}
-	return string(data), nil
+	parseFile(string(data), flags, outputChan)
 }
 
-func writeOutput(flags Flags) error {
-	for fileName, file := range flags.OutputMap {
-		outputFile, err := os.Create(fileName)
+func writeOutput(outputChan <-chan File, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for file := range outputChan {
+		outputFile, err := os.Create(file.FileName)
 		if err != nil {
-			return fmt.Errorf("failed to create output file %s: %v", fileName, err)
+			fmt.Printf("failed to create output file %s: %v\n", file.FileName, err)
+			continue
 		}
 		defer outputFile.Close()
 
 		for _, line := range file.OutputArr {
 			if _, err := outputFile.WriteString(line + "\n"); err != nil {
-				return fmt.Errorf("failed to write to output file %s: %v", fileName, err)
+				fmt.Printf("failed to write to output file %s: %v\n", file.FileName, err)
+				break
 			}
 		}
 	}
-	return nil
 }
 
 func runCommand(command string) error {
@@ -131,18 +139,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	var wg sync.WaitGroup
+	outputChan := make(chan File, len(files))
+
+	// Start goroutines to process each file
 	for _, file := range files {
-		data, err := openFile(file)
-		if err != nil {
-			fmt.Println("Error: ", err)
-			os.Exit(1)
-		}
-		parseFile(data, &flags)
-		if err := writeOutput(flags); err != nil {
-			fmt.Println("Error: ", err)
-			os.Exit(1)
-		}
+		wg.Add(1)
+		go openFile(file, &flags, outputChan, &wg)
 	}
+
+	// Wait for all file processing to complete and then close the channel
+	go func() {
+		wg.Wait()
+		close(outputChan)
+	}()
+
+	// Start goroutine to write output files
+	var writeWg sync.WaitGroup
+	writeWg.Add(1)
+	go writeOutput(outputChan, &writeWg)
+
+	// Wait for all writing to complete
+	writeWg.Wait()
 
 	if flags.Command != "" {
 		if err := runCommand(flags.Command); err != nil {
