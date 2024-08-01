@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
@@ -28,13 +27,7 @@ type Flags struct {
 }
 
 func parseOptions(options string, flags *Flags) error {
-	optionsFile, err := os.Open(options)
-	if err != nil {
-		return fmt.Errorf("failed to open options file: %v", err)
-	}
-	defer optionsFile.Close()
-
-	data, err := ioutil.ReadAll(optionsFile)
+	data, err := os.ReadFile(options)
 	if err != nil {
 		return fmt.Errorf("failed to read options file: %v", err)
 	}
@@ -73,7 +66,7 @@ func parseFile(data string, flags *Flags) {
 }
 
 func openFile(fileName string) (string, error) {
-	data, err := ioutil.ReadFile(fileName)
+	data, err := os.ReadFile(fileName)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file %s: %v", fileName, err)
 	}
